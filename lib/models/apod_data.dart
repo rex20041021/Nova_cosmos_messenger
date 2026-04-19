@@ -29,5 +29,29 @@ class ApodData {
     );
   }
 
+  Map<String, dynamic> toMap() {
+    return {
+      'date': date,
+      'title': title,
+      'explanation': explanation,
+      'url': url,
+      'hdurl': hdurl,
+      'media_type': mediaType,
+      'copyright': copyright,
+    };
+  }
+
+  factory ApodData.fromMap(Map<String, dynamic> map) {
+    return ApodData(
+      date: map['date'] as String,
+      title: map['title'] as String,
+      explanation: map['explanation'] as String,
+      url: map['url'] as String,
+      hdurl: map['hdurl'] as String?,
+      mediaType: map['media_type'] as String,
+      copyright: map['copyright'] as String?,
+    );
+  }
+
   bool get isVideo => mediaType == 'video';
 }

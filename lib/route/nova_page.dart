@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
 import 'package:nova_cosmos_messenger/services/apod_service.dart';
+import 'package:nova_cosmos_messenger/services/favorites_db.dart';
 
 class _Message {
   final String? text;
@@ -68,6 +69,22 @@ class _NovaPageState extends State<NovaPage> {
     }
   }
 
+  Future<void> _addFavorite(ApodData apod) async {
+    final already = await FavoritesDB.exists(apod.date);
+    if (already) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('「${apod.title}」已在收藏'), duration: const Duration(seconds: 2)),
+      );
+      return;
+    }
+    await FavoritesDB.add(apod);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已加入收藏：${apod.title}'), duration: const Duration(seconds: 2)),
+    );
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -98,7 +115,11 @@ class _NovaPageState extends State<NovaPage> {
                 if (i == _messages.length) {
                   return const _LoadingBubble();
                 }
-                return _MessageBubble(message: _messages[i]);
+                final msg = _messages[i];
+                return _MessageBubble(
+                  message: msg,
+                  onLongPress: msg.apod != null ? () => _addFavorite(msg.apod!) : null,
+                );
               },
             ),
           ),
@@ -116,7 +137,8 @@ class _NovaPageState extends State<NovaPage> {
 
 class _MessageBubble extends StatelessWidget {
   final _Message message;
-  const _MessageBubble({required this.message});
+  final VoidCallback? onLongPress;
+  const _MessageBubble({required this.message, this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
@@ -132,19 +154,22 @@ class _MessageBubble extends StatelessWidget {
 
     return Align(
       alignment: align,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.78,
+      child: GestureDetector(
+        onLongPress: onLongPress,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.all(12),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.78,
+          ),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: radius,
+          ),
+          child: message.apod != null
+              ? _ApodCard(apod: message.apod!)
+              : Text(message.text ?? ''),
         ),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: radius,
-        ),
-        child: message.apod != null
-            ? _ApodCard(apod: message.apod!)
-            : Text(message.text ?? ''),
       ),
     );
   }

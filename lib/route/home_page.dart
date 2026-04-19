@@ -11,22 +11,25 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
-
-  final List<Widget> _pages = const [
-    NovaPage(),
-    FavoritesPage(),
-  ];
+  int _favoritesKey = 0;
 
   @override
   Widget build(BuildContext context) {
+    final pages = [
+      const NovaPage(),
+      FavoritesPage(key: ValueKey('favs-$_favoritesKey')),
+    ];
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _pages,
+        children: pages,
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: (i) => setState(() {
+          if (i == 1 && _currentIndex != 1) _favoritesKey++;
+          _currentIndex = i;
+        }),
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.public),

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:nova_cosmos_messenger/route/home_page.dart';
+import 'package:nova_cosmos_messenger/services/favorites_db.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await FavoritesDB.initDatabase();
   runApp(const MyApp());
 }
 
