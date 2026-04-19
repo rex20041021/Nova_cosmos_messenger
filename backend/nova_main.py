@@ -12,7 +12,7 @@ CORS(app)
 
 # 重試用 session：遇到 502/503/504 自動退避重試
 _retry = Retry(
-    total=2,
+    total=3,
     backoff_factor=1,
     status_forcelist=[502, 503, 504],
     allowed_methods=["GET"],
@@ -36,7 +36,7 @@ def fetch_apod(date: str | None = None) -> dict:
     if date:
         params["date"] = date
     url = initParm.NASA_BASE_URL + initParm.APOD_PATH
-    r = _session.get(url, params=params, timeout=30)
+    r = _session.get(url, params=params, timeout=15)
     r.raise_for_status()
     data = r.json()
     _apod_cache[cache_key] = data
@@ -72,10 +72,11 @@ def apod():
         "title": "Eye on the Milky Way",
         "url": "https://apod.nasa.gov/apod/image/2604/EyeOnMW_Claro_960.jpg",
     }
-    return jsonify(fake_date)
+    # return jsonify(fake_date)
 
     try:
         data = fetch_apod(date)
+        print(data)
         return jsonify(data)
     except requests.HTTPError as e:
         return jsonify({"error": f"NASA API error: {e.response.status_code}"}), 502

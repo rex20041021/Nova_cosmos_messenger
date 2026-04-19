@@ -8,7 +8,7 @@ class ApodService {
     final uri = Uri.parse('${ApiConfig.baseUrl}/apod').replace(
       queryParameters: date != null ? {'date': date} : null,
     );
-    final response = await http.get(uri).timeout(const Duration(seconds: 30));
+    final response = await http.get(uri).timeout(const Duration(seconds: 200));
     if (response.statusCode != 200) {
       throw Exception('APOD fetch failed: ${response.statusCode}');
     }
