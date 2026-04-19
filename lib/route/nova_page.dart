@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:nova_cosmos_messenger/models/apod_data.dart';
+import 'package:nova_cosmos_messenger/services/apod_service.dart';
 
 class _Message {
-  final String text;
+  final String? text;
+  final ApodData? apod;
   final bool fromUser;
-  _Message(this.text, {required this.fromUser});
+
+  _Message.text(String this.text, {required this.fromUser}) : apod = null;
+  _Message.apod(ApodData this.apod, {required this.fromUser}) : text = null;
 }
 
 class NovaPage extends StatefulWidget {
@@ -17,8 +22,9 @@ class _NovaPageState extends State<NovaPage> {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<_Message> _messages = [
-    _Message('歡迎！輸入日期我會告訴你那天宇宙長什麼樣子。', fromUser: false),
+    _Message.text('歡迎！輸入日期我會告訴你那天宇宙長什麼樣子。', fromUser: false),
   ];
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -27,14 +33,39 @@ class _NovaPageState extends State<NovaPage> {
     super.dispose();
   }
 
-  void _sendMessage() {
+  String? _parseDate(String input) {
+    final normalized = input.trim().replaceAll('/', '-');
+    final pattern = RegExp(r'^\d{4}-\d{1,2}-\d{1,2}$');
+    return pattern.hasMatch(normalized) ? normalized : null;
+  }
+
+  Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _loading) return;
+
+    final date = _parseDate(text);
     setState(() {
-      _messages.add(_Message(text, fromUser: true));
+      _messages.add(_Message.text(text, fromUser: true));
       _inputController.clear();
+      _loading = true;
     });
     _scrollToBottom();
+
+    try {
+      final apod = await ApodService.fetchApod(date: date);
+      if (!mounted) return;
+      setState(() {
+        _messages.add(_Message.apod(apod, fromUser: false));
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _messages.add(_Message.text('連線失敗：$e', fromUser: false));
+      });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+      _scrollToBottom();
+    }
   }
 
   void _scrollToBottom() {
@@ -62,14 +93,20 @@ class _NovaPageState extends State<NovaPage> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(12),
-              itemCount: _messages.length,
-              itemBuilder: (context, i) => _MessageBubble(message: _messages[i]),
+              itemCount: _messages.length + (_loading ? 1 : 0),
+              itemBuilder: (context, i) {
+                if (i == _messages.length) {
+                  return const _LoadingBubble();
+                }
+                return _MessageBubble(message: _messages[i]);
+              },
             ),
           ),
           const Divider(height: 1),
           _InputBar(
             controller: _inputController,
             onSend: _sendMessage,
+            enabled: !_loading,
           ),
         ],
       ),
@@ -97,15 +134,96 @@ class _MessageBubble extends StatelessWidget {
       alignment: align,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.all(12),
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+          maxWidth: MediaQuery.of(context).size.width * 0.78,
         ),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: radius,
         ),
-        child: Text(message.text),
+        child: message.apod != null
+            ? _ApodCard(apod: message.apod!)
+            : Text(message.text ?? ''),
+      ),
+    );
+  }
+}
+
+class _ApodCard extends StatelessWidget {
+  final ApodData apod;
+  const _ApodCard({required this.apod});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (apod.isVideo)
+          Text(
+            '影片：${apod.url}',
+            style: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
+          )
+        else
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(
+              apod.url,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return const SizedBox(
+                  height: 180,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              },
+              errorBuilder: (context, error, stack) => const SizedBox(
+                height: 120,
+                child: Center(child: Icon(Icons.broken_image, size: 40)),
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        Text(
+          apod.title,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          apod.date,
+          style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          apod.explanation,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13),
+        ),
+      ],
+    );
+  }
+}
+
+class _LoadingBubble extends StatelessWidget {
+  const _LoadingBubble();
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
       ),
     );
   }
@@ -114,8 +232,13 @@ class _MessageBubble extends StatelessWidget {
 class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
+  final bool enabled;
 
-  const _InputBar({required this.controller, required this.onSend});
+  const _InputBar({
+    required this.controller,
+    required this.onSend,
+    required this.enabled,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -129,7 +252,7 @@ class _InputBar extends StatelessWidget {
               child: TextField(
                 controller: controller,
                 textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
+                onSubmitted: enabled ? (_) => onSend() : null,
                 decoration: InputDecoration(
                   hintText: '發送訊息...',
                   filled: true,
@@ -147,11 +270,11 @@ class _InputBar extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.send),
-              onPressed: onSend,
+              onPressed: enabled ? onSend : null,
             ),
             IconButton(
               icon: const Icon(Icons.calendar_today_outlined),
-              onPressed: () {},
+              onPressed: enabled ? () {} : null,
             ),
           ],
         ),

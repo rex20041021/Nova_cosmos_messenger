@@ -4,7 +4,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from datetime import date as date_cls
 import requests
-import backend.nova_init as initParm
+import nova_init as initParm
 
 
 app = Flask(__name__)
