@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
 import 'package:nova_cosmos_messenger/services/apod_service.dart';
 import 'package:nova_cosmos_messenger/services/favorites_db.dart';
+import 'package:nova_cosmos_messenger/route/apod_detail_page.dart';
 
 class _Message {
   final String? text;
@@ -119,6 +120,14 @@ class _NovaPageState extends State<NovaPage> {
                 return _MessageBubble(
                   message: msg,
                   onLongPress: msg.apod != null ? () => _addFavorite(msg.apod!) : null,
+                  onTap: msg.apod != null
+                      ? () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ApodDetailPage(apod: msg.apod!),
+                            ),
+                          )
+                      : null,
                 );
               },
             ),
@@ -138,7 +147,8 @@ class _NovaPageState extends State<NovaPage> {
 class _MessageBubble extends StatelessWidget {
   final _Message message;
   final VoidCallback? onLongPress;
-  const _MessageBubble({required this.message, this.onLongPress});
+  final VoidCallback? onTap;
+  const _MessageBubble({required this.message, this.onLongPress, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -156,6 +166,7 @@ class _MessageBubble extends StatelessWidget {
       alignment: align,
       child: GestureDetector(
         onLongPress: onLongPress,
+        onTap: onTap,
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 4),
           padding: const EdgeInsets.all(12),

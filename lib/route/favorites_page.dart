@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
 import 'package:nova_cosmos_messenger/services/favorites_db.dart';
+import 'package:nova_cosmos_messenger/route/apod_detail_page.dart';
 
 class FavoritesPage extends StatefulWidget {
   const FavoritesPage({super.key});
@@ -74,6 +75,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     return _FavoriteCard(
                       apod: apod,
                       onLongPress: () => _confirmDelete(apod),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ApodDetailPage(apod: apod),
+                        ),
+                      ),
                     );
                   },
                 ),
@@ -84,13 +91,19 @@ class _FavoritesPageState extends State<FavoritesPage> {
 class _FavoriteCard extends StatelessWidget {
   final ApodData apod;
   final VoidCallback onLongPress;
+  final VoidCallback onTap;
 
-  const _FavoriteCard({required this.apod, required this.onLongPress});
+  const _FavoriteCard({
+    required this.apod,
+    required this.onLongPress,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onLongPress: onLongPress,
+      onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
           color: Colors.grey.shade100,
