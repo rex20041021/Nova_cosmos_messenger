@@ -1,8 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from datetime import date as date_cls
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
 import requests
 import nova_init as initParm
 
@@ -44,6 +46,106 @@ def fetch_apod(date: str | None = None) -> dict:
     return data
 
 
+# -------- image card --------
+
+_CARD_WIDTH = 1080
+_PADDING = 48
+
+
+def _load_font(size: int):
+    candidates = [
+        "C:/Windows/Fonts/arialbd.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except (OSError, IOError):
+            continue
+    return ImageFont.load_default()
+
+
+def _wrap_text(text: str, font, max_width: int, draw) -> list[str]:
+    words = text.split()
+    lines: list[str] = []
+    current: list[str] = []
+    for word in words:
+        test = " ".join(current + [word])
+        bbox = draw.textbbox((0, 0), test, font=font)
+        if (bbox[2] - bbox[0]) <= max_width or not current:
+            current.append(word)
+        else:
+            lines.append(" ".join(current))
+            current = [word]
+    if current:
+        lines.append(" ".join(current))
+    return lines
+
+
+def compose_card(image_bytes: bytes, title: str, date: str) -> BytesIO:
+    img = Image.open(BytesIO(image_bytes)).convert("RGB")
+    ratio = _CARD_WIDTH / img.width
+    new_h = int(img.height * ratio)
+    img = img.resize((_CARD_WIDTH, new_h), Image.LANCZOS).convert("RGBA")
+
+    # 上方深色漸層（讓白字可讀）
+    top_h = 300
+    top_overlay = Image.new("RGBA", (_CARD_WIDTH, top_h), (0, 0, 0, 0))
+    top_draw = ImageDraw.Draw(top_overlay)
+    for y in range(top_h):
+        alpha = int(210 * (1 - y / top_h))
+        top_draw.line([(0, y), (_CARD_WIDTH, y)], fill=(0, 0, 0, alpha))
+    img.paste(top_overlay, (0, 0), top_overlay)
+
+    # 下方薄漸層
+    bottom_h = 90
+    bottom_overlay = Image.new("RGBA", (_CARD_WIDTH, bottom_h), (0, 0, 0, 0))
+    bottom_draw = ImageDraw.Draw(bottom_overlay)
+    for y in range(bottom_h):
+        alpha = int(170 * (y / bottom_h))
+        bottom_draw.line([(0, y), (_CARD_WIDTH, y)], fill=(0, 0, 0, alpha))
+    img.paste(bottom_overlay, (0, img.height - bottom_h), bottom_overlay)
+
+    draw = ImageDraw.Draw(img)
+
+    title_font = _load_font(56)
+    date_font = _load_font(34)
+    attr_font = _load_font(24)
+
+    # 標題（最多 2 行）
+    title_lines = _wrap_text(title, title_font, _CARD_WIDTH - 2 * _PADDING, draw)[:2]
+    y = _PADDING
+    for line in title_lines:
+        draw.text((_PADDING, y), line, font=title_font, fill=(255, 255, 255))
+        bbox = draw.textbbox((0, 0), line, font=title_font)
+        y += (bbox[3] - bbox[1]) + 12
+
+    # 日期
+    draw.text((_PADDING, y + 8), date, font=date_font, fill=(220, 220, 220))
+
+    # 右下角署名
+    attr = "NASA Astronomy Picture of the Day"
+    bbox = draw.textbbox((0, 0), attr, font=attr_font)
+    attr_w = bbox[2] - bbox[0]
+    draw.text(
+        (_CARD_WIDTH - _PADDING - attr_w, img.height - 55),
+        attr,
+        font=attr_font,
+        fill=(230, 230, 230),
+    )
+
+    # 扁平化成 RGB 輸出 JPEG
+    flat = Image.new("RGB", img.size, (0, 0, 0))
+    flat.paste(img, (0, 0), img)
+    buf = BytesIO()
+    flat.save(buf, format="JPEG", quality=90)
+    buf.seek(0)
+    return buf
+
+
 # -------- api --------
 
 # 首頁：列出可用端點
@@ -54,6 +156,7 @@ def index():
     <ul>
       <li><a href="/apod">GET /apod</a> — 今日 APOD</li>
       <li><a href="/apod?date=1995-06-20">GET /apod?date=YYYY-MM-DD</a> — 指定日期 APOD</li>
+      <li><a href="/apod/card?date=1995-06-20">GET /apod/card?date=YYYY-MM-DD</a> — 產生分享卡片圖</li>
     </ul>
     """
 
@@ -82,6 +185,31 @@ def apod():
         return jsonify({"error": f"NASA API error: {e.response.status_code}"}), 502
     except requests.RequestException as e:
         return jsonify({"error": f"Request failed: {str(e)}"}), 500
+
+
+# 產生合成分享卡片（背景圖 + 標題 + 日期）
+@app.route("/apod/card", methods=["GET"])
+def apod_card():
+    date = request.args.get("date")
+    try:
+        data = fetch_apod(date)
+        if data.get("media_type") == "video":
+            return jsonify({"error": "video APOD has no image"}), 400
+        img_url = data.get("hdurl") or data.get("url")
+        r = _session.get(img_url, timeout=30)
+        r.raise_for_status()
+        buf = compose_card(r.content, data.get("title", ""), data.get("date", ""))
+        return send_file(
+            buf,
+            mimetype="image/jpeg",
+            download_name=f"apod_{data.get('date', 'card')}.jpg",
+        )
+    except requests.HTTPError as e:
+        return jsonify({"error": f"NASA API error: {e.response.status_code}"}), 502
+    except requests.RequestException as e:
+        return jsonify({"error": f"Request failed: {str(e)}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Card generation failed: {str(e)}"}), 500
 
 
 # -------- main --------
