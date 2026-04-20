@@ -75,12 +75,15 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     return _FavoriteCard(
                       apod: apod,
                       onLongPress: () => _confirmDelete(apod),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ApodDetailPage(apod: apod),
-                        ),
-                      ),
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ApodDetailPage(apod: apod),
+                          ),
+                        );
+                        await _reload();
+                      },
                     );
                   },
                 ),

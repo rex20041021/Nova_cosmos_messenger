@@ -1,19 +1,97 @@
 import 'package:flutter/material.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
+import 'package:nova_cosmos_messenger/services/favorites_db.dart';
 
-class ApodDetailPage extends StatelessWidget {
+class ApodDetailPage extends StatefulWidget {
   final ApodData apod;
 
   const ApodDetailPage({super.key, required this.apod});
 
   @override
+  State<ApodDetailPage> createState() => _ApodDetailPageState();
+}
+
+class _ApodDetailPageState extends State<ApodDetailPage> {
+  bool _isFavorite = false;
+  bool _statusLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFavorite();
+  }
+
+  Future<void> _checkFavorite() async {
+    final exists = await FavoritesDB.exists(widget.apod.date);
+    if (!mounted) return;
+    setState(() {
+      _isFavorite = exists;
+      _statusLoaded = true;
+    });
+  }
+
+  Future<void> _toggleFavorite() async {
+    if (!_statusLoaded) return;
+    if (_isFavorite) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('移除收藏'),
+          content: Text('要從收藏移除「${widget.apod.title}」嗎？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('移除'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      await FavoritesDB.remove(widget.apod.date);
+      if (!mounted) return;
+      setState(() => _isFavorite = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已移除：${widget.apod.title}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      await FavoritesDB.add(widget.apod);
+      if (!mounted) return;
+      setState(() => _isFavorite = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已加入收藏：${widget.apod.title}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final apod = widget.apod;
     final imageUrl = apod.hdurl ?? apod.url;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(apod.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         centerTitle: false,
+        actions: [
+          IconButton(
+            tooltip: _isFavorite ? '移除收藏' : '加入收藏',
+            icon: Icon(
+              _isFavorite ? Icons.star : Icons.star_border,
+              color: _isFavorite ? Colors.amber : null,
+            ),
+            onPressed: _statusLoaded ? _toggleFavorite : null,
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(
