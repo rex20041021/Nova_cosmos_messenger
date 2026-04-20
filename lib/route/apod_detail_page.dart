@@ -1,4 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:nova_cosmos_messenger/config/api_config.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
 import 'package:nova_cosmos_messenger/services/favorites_db.dart';
 
@@ -28,6 +33,54 @@ class _ApodDetailPageState extends State<ApodDetailPage> {
       _isFavorite = exists;
       _statusLoaded = true;
     });
+  }
+
+  Future<void> _share() async {
+    final apod = widget.apod;
+    final caption =
+        '${apod.title}（${apod.date}）\n\n${apod.explanation}\n\n— NASA Astronomy Picture of the Day';
+
+    if (apod.isVideo) {
+      await Share.share(
+        '$caption\n\n${apod.url}',
+        subject: apod.title,
+      );
+      return;
+    }
+
+    final cardUrl = '${ApiConfig.baseUrl}/apod/card?date=${apod.date}';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final response =
+          await http.get(Uri.parse(cardUrl)).timeout(const Duration(seconds: 60));
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/apod_${apod.date}_card.jpg');
+      await file.writeAsBytes(response.bodyBytes);
+
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: caption,
+        subject: apod.title,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('分享失敗：$e')),
+      );
+    }
   }
 
   Future<void> _toggleFavorite() async {
@@ -83,6 +136,11 @@ class _ApodDetailPageState extends State<ApodDetailPage> {
         title: Text(apod.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         centerTitle: false,
         actions: [
+          IconButton(
+            tooltip: '分享',
+            icon: const Icon(Icons.share),
+            onPressed: _share,
+          ),
           IconButton(
             tooltip: _isFavorite ? '移除收藏' : '加入收藏',
             icon: Icon(
