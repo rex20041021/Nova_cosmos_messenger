@@ -109,7 +109,7 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('對話紀錄'),
+        title: const Text('Nova'),
         centerTitle: false,
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _reload),

@@ -1,10 +1,48 @@
 import 'package:flutter/material.dart';
-import 'package:nova_cosmos_messenger/route/nova_page.dart';
+import 'package:nova_cosmos_messenger/services/apod_service.dart';
 import 'package:nova_cosmos_messenger/route/favorites_page.dart';
 import 'package:nova_cosmos_messenger/route/chat_history_page.dart';
+import 'package:nova_cosmos_messenger/route/apod_detail_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
+
+  Future<void> _queryApod(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(1995, 6, 16),
+      lastDate: DateTime.now(),
+      helpText: '選擇 APOD 日期',
+    );
+    if (picked == null) return;
+    if (!context.mounted) return;
+
+    final dateStr =
+        '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final apod = await ApodService.fetchApod(date: dateStr);
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => ApodDetailPage(apod: apod)),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('查詢失敗：$e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,13 +71,20 @@ class HomePage extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               _HomeButton(
-                icon: Icons.public,
+                icon: Icons.forum,
                 title: 'Nova',
-                subtitle: '輸入日期查詢 NASA 每日星空',
+                subtitle: '與 Nova 聊天，查詢每日星空並保留紀錄',
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const NovaPage()),
+                  MaterialPageRoute(builder: (_) => const ChatHistoryPage()),
                 ),
+              ),
+              const SizedBox(height: 12),
+              _HomeButton(
+                icon: Icons.calendar_today,
+                title: 'APOD',
+                subtitle: '選擇日期，直接查看當天的星空',
+                onTap: () => _queryApod(context),
               ),
               const SizedBox(height: 12),
               _HomeButton(
@@ -49,16 +94,6 @@ class HomePage extends StatelessWidget {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const FavoritesPage()),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _HomeButton(
-                icon: Icons.history,
-                title: '對話紀錄',
-                subtitle: '查看與 Nova 的聊天紀錄',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ChatHistoryPage()),
                 ),
               ),
             ],
