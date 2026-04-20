@@ -1,13 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:nova_cosmos_messenger/models/chat_room.dart';
+import 'package:nova_cosmos_messenger/services/chat_db.dart';
 import 'package:nova_cosmos_messenger/route/chat_room_page.dart';
-
-class ChatRoom {
-  final String id;
-  String name;
-  final DateTime createdAt;
-
-  ChatRoom({required this.id, required this.name, required this.createdAt});
-}
 
 class ChatHistoryPage extends StatefulWidget {
   const ChatHistoryPage({super.key});
@@ -17,20 +11,32 @@ class ChatHistoryPage extends StatefulWidget {
 }
 
 class _ChatHistoryPageState extends State<ChatHistoryPage> {
-  final List<ChatRoom> _rooms = [];
+  List<ChatRoom> _rooms = [];
+  bool _loading = true;
 
-  void _addRoom() {
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final rows = await ChatDB.getAllRooms();
+    if (!mounted) return;
     setState(() {
-      _rooms.add(ChatRoom(
-        id: 'room${DateTime.now().millisecondsSinceEpoch}',
-        name: '對話 ${_rooms.length + 1}',
-        createdAt: DateTime.now(),
-      ));
+      _rooms = rows;
+      _loading = false;
     });
   }
 
-  Future<void> _renameRoom(int index) async {
-    final controller = TextEditingController(text: _rooms[index].name);
+  Future<void> _addRoom() async {
+    final name = '對話 ${_rooms.length + 1}';
+    await ChatDB.createRoom(name);
+    await _reload();
+  }
+
+  Future<void> _renameRoom(ChatRoom room) async {
+    final controller = TextEditingController(text: room.name);
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -53,16 +59,17 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
       ),
     );
     if (newName != null && newName.isNotEmpty) {
-      setState(() => _rooms[index].name = newName);
+      await ChatDB.renameRoom(room.id, newName);
+      await _reload();
     }
   }
 
-  Future<void> _confirmDelete(int index) async {
+  Future<void> _confirmDelete(ChatRoom room) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('刪除對話'),
-        content: Text('要刪除「${_rooms[index].name}」嗎？'),
+        content: Text('要刪除「${room.name}」嗎？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -76,15 +83,17 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
       ),
     );
     if (ok == true) {
-      setState(() => _rooms.removeAt(index));
+      await ChatDB.deleteRoom(room.id);
+      await _reload();
     }
   }
 
-  void _openRoom(ChatRoom room) {
-    Navigator.push(
+  Future<void> _openRoom(ChatRoom room) async {
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ChatRoomPage(room: room)),
     );
+    await _reload();
   }
 
   String _formatDate(DateTime d) {
@@ -102,57 +111,62 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
       appBar: AppBar(
         title: const Text('對話紀錄'),
         centerTitle: false,
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _reload),
+        ],
       ),
-      body: _rooms.isEmpty
-          ? const Center(
-              child: Text('尚無對話，點右下角新增',
-                  style: TextStyle(color: Colors.grey)),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(12),
-              itemCount: _rooms.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, i) {
-                final room = _rooms[i];
-                return Material(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(10),
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: Colors.indigo,
-                      child: Icon(Icons.chat_bubble_outline,
-                          color: Colors.white, size: 20),
-                    ),
-                    title: Text(
-                      room.name,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Text(
-                      _formatDate(room.createdAt),
-                      style: TextStyle(
-                          color: Colors.grey.shade700, fontSize: 12),
-                    ),
-                    onTap: () => _openRoom(room),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, size: 20),
-                          onPressed: () => _renameRoom(i),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _rooms.isEmpty
+              ? const Center(
+                  child: Text('尚無對話，點右下角新增',
+                      style: TextStyle(color: Colors.grey)),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _rooms.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, i) {
+                    final room = _rooms[i];
+                    return Material(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(10),
+                      child: ListTile(
+                        leading: const CircleAvatar(
+                          backgroundColor: Colors.indigo,
+                          child: Icon(Icons.chat_bubble_outline,
+                              color: Colors.white, size: 20),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.delete,
-                              size: 20, color: Colors.redAccent),
-                          onPressed: () => _confirmDelete(i),
+                        title: Text(
+                          room.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                      ],
-                    ),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
-              },
-            ),
+                        subtitle: Text(
+                          _formatDate(room.updatedAt),
+                          style: TextStyle(
+                              color: Colors.grey.shade700, fontSize: 12),
+                        ),
+                        onTap: () => _openRoom(room),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, size: 20),
+                              onPressed: () => _renameRoom(room),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete,
+                                  size: 20, color: Colors.redAccent),
+                              onPressed: () => _confirmDelete(room),
+                            ),
+                          ],
+                        ),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                    );
+                  },
+                ),
       floatingActionButton: FloatingActionButton(
         onPressed: _addRoom,
         tooltip: '新增對話',
