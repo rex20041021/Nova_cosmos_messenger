@@ -25,8 +25,31 @@ _session.mount("https://", HTTPAdapter(max_retries=_retry))
 # APOD 快取：key 為日期字串，避免同日期重複打 API
 _apod_cache: dict[str, dict] = {}
 
+# Nova 人格（system prompt）。之後 Step 3 會在這裡追加今天日期、tool 使用說明。
+NOVA_SYSTEM_PROMPT = (
+    "你是 Nova，一位熱愛天文的 AI 夥伴。"
+    "你的任務是陪使用者聊天、介紹天文知識、協助他們探索 NASA 每日天文圖 (APOD)。"
+    "請一律用繁體中文回覆，語氣輕鬆親切，避免過長的教科書式說明。"
+    "如果使用者只是閒聊，就自然地聊；如果問到天文主題，給出準確、簡潔的解釋。"
+)
+
 
 # -------- functions --------
+
+def call_groq(messages: list[dict], temperature: float = 0.7) -> dict:
+    headers = {
+        "Authorization": f"Bearer {initParm.GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": initParm.GROQ_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    r = requests.post(initParm.GROQ_URL, headers=headers, json=payload, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
 
 def fetch_apod(date: str | None = None) -> dict:
     cache_key = date or date_cls.today().isoformat()
@@ -157,6 +180,7 @@ def index():
       <li><a href="/apod">GET /apod</a> — 今日 APOD</li>
       <li><a href="/apod?date=1995-06-20">GET /apod?date=YYYY-MM-DD</a> — 指定日期 APOD</li>
       <li><a href="/apod/card?date=1995-06-20">GET /apod/card?date=YYYY-MM-DD</a> — 產生分享卡片圖</li>
+      <li>POST /chat — Nova 對話（body: {"text": "...", "history": [{"role": "user"|"ai", "text": "..."}]}）</li>
     </ul>
     """
 
@@ -210,6 +234,36 @@ def apod_card():
         return jsonify({"error": f"Request failed: {str(e)}"}), 500
     except Exception as e:
         return jsonify({"error": f"Card generation failed: {str(e)}"}), 500
+
+
+# Nova 對話：支援多輪歷史，目前只純 LLM，Step 3 會加 APOD / Wikipedia tools
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.get_json(silent=True) or {}
+    user_text = (data.get("text") or "").strip()
+    history = data.get("history") or []
+
+    if not user_text:
+        return jsonify({"error": "text is required"}), 400
+
+    messages: list[dict] = [{"role": "system", "content": NOVA_SYSTEM_PROMPT}]
+    for msg in history:
+        role = "user" if msg.get("role") == "user" else "assistant"
+        text = (msg.get("text") or "").strip()
+        if text:
+            messages.append({"role": role, "content": text})
+    messages.append({"role": "user", "content": user_text})
+
+    try:
+        resp = call_groq(messages)
+    except requests.HTTPError as e:
+        return jsonify({"error": f"Groq API error: {e.response.status_code}"}), 502
+    except requests.RequestException as e:
+        return jsonify({"error": f"Request failed: {str(e)}"}), 500
+
+    choice = (resp.get("choices") or [{}])[0]
+    ai_text = ((choice.get("message") or {}).get("content") or "").strip()
+    return jsonify({"text": ai_text})
 
 
 # -------- main --------

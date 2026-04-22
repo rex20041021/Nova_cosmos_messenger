@@ -10,6 +10,8 @@
 .env.local
 !.env.example
 
+backend/test.py
+
 .atom/
 .build/
 .buildlog/
