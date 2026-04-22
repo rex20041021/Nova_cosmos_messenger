@@ -5,6 +5,7 @@ from urllib3.util.retry import Retry
 from datetime import date as date_cls
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+from urllib.parse import quote
 import json
 import requests
 import nova_init as initParm
@@ -35,8 +36,15 @@ NOVA_SYSTEM_PROMPT_BASE = (
     "當使用者想看某一天的 APOD（例如『給我看2000年10月10日的照片』、"
     "『今天的 APOD』、『昨天的那張』），請呼叫 fetch_apod 工具。"
     "日期格式必須為 YYYY-MM-DD；若使用者說『今天』就省略 date 參數。"
-    "拿到工具結果後，用繁中簡短介紹這張圖的主題，不要把英文原文完整貼上來。"
+    "拿到工具結果後，用繁中簡短介紹這張圖的主題，不要把英文原文完整貼上來。\n"
+    "當使用者詢問特定天體、天文現象、太空任務或儀器的深入知識（例如『蟹狀星雲是什麼？』、"
+    "『詹姆斯·韋伯望遠鏡的特色？』、『黑洞的事件視界』），請呼叫 search_wikipedia 工具查詢。"
+    "呼叫時 query 必須翻成英文（如：蟹狀星雲→Crab Nebula、黑洞→Black hole）。"
+    "工具結果是英文摘要，請轉述成繁中並融入你的回答，不要整段貼英文原文。"
+    "閒聊或使用者問題本身就很模糊時不必呼叫 wikipedia。"
 )
+
+WIKI_UA = "NovaCosmosMessenger/0.1 (https://github.com/)"
 
 # APOD tool 定義（OpenAI-compatible function calling）
 FETCH_APOD_TOOL = {
@@ -57,6 +65,32 @@ FETCH_APOD_TOOL = {
                 },
             },
             "required": [],
+        },
+    },
+}
+
+SEARCH_WIKIPEDIA_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_wikipedia",
+        "description": (
+            "Search English Wikipedia for astronomical knowledge: celestial objects, "
+            "missions, instruments, phenomena, astronomers. Use when the user wants "
+            "encyclopedic information. Do NOT use for casual chat."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "English search term. Translate Chinese terms first "
+                        "(蟹狀星雲→Crab Nebula, 哈伯太空望遠鏡→Hubble Space Telescope, "
+                        "黑洞→Black hole)."
+                    ),
+                },
+            },
+            "required": ["query"],
         },
     },
 }
@@ -112,6 +146,47 @@ def fetch_apod(date: str | None = None) -> dict:
     _apod_cache[cache_key] = data
     print(f"[cache store] {cache_key}")
     return data
+
+
+def search_wikipedia(query: str) -> dict | None:
+    base = "https://en.wikipedia.org"
+    headers = {"User-Agent": WIKI_UA}
+
+    # opensearch 找最接近的條目標題
+    r = requests.get(
+        f"{base}/w/api.php",
+        headers=headers,
+        params={
+            "action": "opensearch",
+            "search": query,
+            "limit": 1,
+            "namespace": 0,
+            "format": "json",
+        },
+        timeout=10,
+    )
+    r.raise_for_status()
+    data = r.json()
+    titles = data[1] if len(data) > 1 else []
+    if not titles:
+        return None
+    title = titles[0]
+
+    # 取條目摘要
+    r2 = requests.get(
+        f"{base}/api/rest_v1/page/summary/{quote(title)}",
+        headers=headers,
+        timeout=10,
+    )
+    r2.raise_for_status()
+    s = r2.json()
+    return {
+        "title": s.get("title"),
+        "description": s.get("description"),
+        "extract": s.get("extract"),
+        "url": (s.get("content_urls") or {}).get("desktop", {}).get("page"),
+        "thumbnail": (s.get("thumbnail") or {}).get("source"),
+    }
 
 
 # -------- image card --------
@@ -329,6 +404,24 @@ def _execute_tool_call(tc: dict) -> tuple[dict, dict]:
         }
         return (for_llm, {"apod": full})
 
+    if name == "search_wikipedia":
+        query = (args.get("query") or "").strip()
+        if not query:
+            return ({"error": "query is required"}, {})
+        try:
+            result = search_wikipedia(query)
+        except Exception as e:
+            return ({"error": str(e)}, {})
+        if result is None:
+            return ({"error": f"No Wikipedia article found for: {query}"}, {})
+        # LLM 只需要 title / description / extract，縮圖和 URL 給前端用
+        for_llm = {
+            "title": result.get("title"),
+            "description": result.get("description"),
+            "extract": result.get("extract"),
+        }
+        return (for_llm, {"wiki": result})
+
     return ({"error": f"Unknown tool: {name}"}, {})
 
 
@@ -375,7 +468,10 @@ def chat():
 
     messages = _build_chat_messages(history, user_text)
     try:
-        return jsonify(_run_chat_loop(messages, tools=[FETCH_APOD_TOOL]))
+        return jsonify(_run_chat_loop(
+            messages,
+            tools=[FETCH_APOD_TOOL, SEARCH_WIKIPEDIA_TOOL],
+        ))
     except requests.HTTPError as e:
         return jsonify({"error": f"Groq API error: {e.response.status_code}"}), 502
     except requests.RequestException as e:
