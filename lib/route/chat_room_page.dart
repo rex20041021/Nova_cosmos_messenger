@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
 import 'package:nova_cosmos_messenger/models/chat_room.dart';
 import 'package:nova_cosmos_messenger/models/chat_message.dart';
-import 'package:nova_cosmos_messenger/services/apod_service.dart';
 import 'package:nova_cosmos_messenger/services/chat_db.dart';
+import 'package:nova_cosmos_messenger/services/chat_service.dart';
 import 'package:nova_cosmos_messenger/services/favorites_db.dart';
 import 'package:nova_cosmos_messenger/route/apod_detail_page.dart';
 
@@ -46,19 +46,13 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     _scrollToBottom();
   }
 
-  String? _parseDate(String input) {
-    final normalized = input.trim().replaceAll('/', '-');
-    final pattern = RegExp(r'^\d{4}-\d{1,2}-\d{1,2}$');
-    return pattern.hasMatch(normalized) ? normalized : null;
-  }
-
   String _newId() => 'msg${DateTime.now().microsecondsSinceEpoch}';
 
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _loading) return;
 
-    final date = _parseDate(text);
+    final historySnapshot = List<ChatMessage>.from(_messages);
     final userMsg = ChatMessage(
       id: _newId(),
       roomId: widget.room.id,
@@ -75,17 +69,34 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     _scrollToBottom();
 
     try {
-      final apod = await ApodService.fetchApod(date: date);
-      if (!mounted) return;
-      final replyMsg = ChatMessage(
-        id: _newId(),
-        roomId: widget.room.id,
-        apod: apod,
-        fromUser: false,
-        createdAt: DateTime.now(),
+      final reply = await ChatService.sendMessage(
+        text: text,
+        history: historySnapshot,
       );
-      setState(() => _messages.add(replyMsg));
-      await ChatDB.addMessage(replyMsg);
+      if (!mounted) return;
+      final now = DateTime.now();
+      if (reply.text.isNotEmpty) {
+        final textMsg = ChatMessage(
+          id: _newId(),
+          roomId: widget.room.id,
+          text: reply.text,
+          fromUser: false,
+          createdAt: now,
+        );
+        setState(() => _messages.add(textMsg));
+        await ChatDB.addMessage(textMsg);
+      }
+      if (reply.apod != null) {
+        final apodMsg = ChatMessage(
+          id: _newId(),
+          roomId: widget.room.id,
+          apod: reply.apod,
+          fromUser: false,
+          createdAt: now.add(const Duration(milliseconds: 1)),
+        );
+        setState(() => _messages.add(apodMsg));
+        await ChatDB.addMessage(apodMsg);
+      }
     } catch (e) {
       if (!mounted) return;
       final errMsg = ChatMessage(
@@ -152,7 +163,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   child: _messages.isEmpty && !_loading
                       ? const Center(
                           child: Text(
-                            '輸入日期開始對話',
+                            '和 Nova 聊聊天文，或請它找某一天的 APOD',
                             style: TextStyle(color: Colors.grey),
                           ),
                         )
