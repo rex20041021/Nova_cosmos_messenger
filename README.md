@@ -61,9 +61,11 @@ DEMO: https://youtu.be/DjMtMbplITE
 
 **Flask** keeps the backend minimal. The only reason a backend exists at all is to proxy API secrets (NASA key, Groq key) away from the client, and to run the server-side card-image composer (Pillow) that cannot run on-device. Everything else stays local.
 
-**NASA APOD API** has a 30 requests/day quota and is occasionally unreliable. Two layers of defence are in place: ① a server-side in-memory cache (`_apod_cache`, keyed by date string) so the same date never hits the API twice; ② `requests.HTTPAdapter` with `Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])` so transient network errors back off and retry automatically instead of surfacing a failure to the user.
+**NASA APOD API** has a 30 requests/day quota and is occasionally unreliable. Two layers of defence are in place: 1. a server-side in-memory cache (`_apod_cache`, keyed by date string) so the same date never hits the API twice; 2. `requests.HTTPAdapter` with `Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])` so transient network errors back off and retry automatically instead of surfacing a failure to the user.
 
 **sqflite (SQLite)** provides zero-dependency local persistence. Chat history and favourites survive app restarts without any remote account or network. Schema migrations are handled with `onUpgrade` callbacks — v2 added `wiki_json` via `ALTER TABLE`.
+
+**Wikipedia REST API** provides free, structured encyclopedic content with no authentication required. The `/api/rest_v1/page/summary/{title}` endpoint returns a clean JSON payload (title, description, extract, thumbnail URL, page URL) that maps directly to the wiki card rendered in chat — no scraping or HTML parsing needed.
 
 **Groq / llama-3.3-70b-versatile** gives OpenAI-compatible function calling at zero cost during prototyping. Nova runs as a **tool-use agent**: the model decides on its own whether to call `fetch_apod` or `search_wikipedia`, with what arguments, and the backend loop (`_run_chat_loop`) iterates up to 3 rounds so the model can chain tool results into a final answer — the classic ReAct (Reason + Act) pattern.
 
