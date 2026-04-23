@@ -4,9 +4,15 @@ import 'package:nova_cosmos_messenger/config/api_config.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
 
 class ApodService {
-  static Future<ApodData> fetchApod({String? date}) async {
+  static Future<ApodData> fetchApod({String? date, bool random = false}) async {
+    final params = <String, String>{};
+    if (random) {
+      params['random'] = 'true';
+    } else if (date != null) {
+      params['date'] = date;
+    }
     final uri = Uri.parse('${ApiConfig.baseUrl}/apod').replace(
-      queryParameters: date != null ? {'date': date} : null,
+      queryParameters: params.isEmpty ? null : params,
     );
     final response = await http.get(uri).timeout(const Duration(seconds: 200));
     if (response.statusCode != 200) {

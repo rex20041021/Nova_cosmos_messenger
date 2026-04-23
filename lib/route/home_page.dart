@@ -8,6 +8,39 @@ class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   Future<void> _queryApod(BuildContext context) async {
+    final mode = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.calendar_today),
+              title: const Text('選擇日期'),
+              subtitle: const Text('挑一個你想看的日子'),
+              onTap: () => Navigator.pop(ctx, 'date'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.casino),
+              title: const Text('隨機一天'),
+              subtitle: const Text('讓 NASA 隨機挑一張給你'),
+              onTap: () => Navigator.pop(ctx, 'random'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (mode == null || !context.mounted) return;
+
+    if (mode == 'date') {
+      await _queryByDate(context);
+    } else if (mode == 'random') {
+      await _queryRandom(context);
+    }
+  }
+
+  Future<void> _queryByDate(BuildContext context) async {
     final picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
@@ -20,15 +53,24 @@ class HomePage extends StatelessWidget {
 
     final dateStr =
         '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+    await _fetchAndShow(context, () => ApodService.fetchApod(date: dateStr));
+  }
 
+  Future<void> _queryRandom(BuildContext context) async {
+    await _fetchAndShow(context, () => ApodService.fetchApod(random: true));
+  }
+
+  Future<void> _fetchAndShow(
+    BuildContext context,
+    Future<dynamic> Function() fetcher,
+  ) async {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
-
     try {
-      final apod = await ApodService.fetchApod(date: dateStr);
+      final apod = await fetcher();
       if (!context.mounted) return;
       Navigator.pop(context);
       Navigator.push(
@@ -83,7 +125,7 @@ class HomePage extends StatelessWidget {
               _HomeButton(
                 icon: Icons.calendar_today,
                 title: 'APOD',
-                subtitle: '選擇日期，直接查看當天的星空',
+                subtitle: '挑一個日期，或讓 NOVA 隨機推一張星空',
                 onTap: () => _queryApod(context),
               ),
               const SizedBox(height: 12),
