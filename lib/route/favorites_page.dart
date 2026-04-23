@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
 import 'package:nova_cosmos_messenger/services/favorites_db.dart';
 import 'package:nova_cosmos_messenger/route/apod_detail_page.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class FavoritesPage extends StatefulWidget {
   const FavoritesPage({super.key});
@@ -27,6 +28,25 @@ class _FavoritesPageState extends State<FavoritesPage> {
       _items = rows;
       _loading = false;
     });
+  }
+
+  Future<void> _openItem(ApodData apod) async {
+    if (apod.isVideo) {
+      final uri = Uri.tryParse(apod.url);
+      if (uri == null) return;
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('無法開啟連結：${apod.url}')),
+        );
+      }
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ApodDetailPage(apod: apod)),
+    );
+    await _reload();
   }
 
   Future<void> _confirmDelete(ApodData apod) async {
@@ -75,15 +95,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     return _FavoriteCard(
                       apod: apod,
                       onLongPress: () => _confirmDelete(apod),
-                      onTap: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ApodDetailPage(apod: apod),
-                          ),
-                        );
-                        await _reload();
-                      },
+                      onTap: () => _openItem(apod),
                     );
                   },
                 ),

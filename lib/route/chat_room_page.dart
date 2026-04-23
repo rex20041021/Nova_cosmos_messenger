@@ -7,6 +7,18 @@ import 'package:nova_cosmos_messenger/services/chat_db.dart';
 import 'package:nova_cosmos_messenger/services/chat_service.dart';
 import 'package:nova_cosmos_messenger/services/favorites_db.dart';
 import 'package:nova_cosmos_messenger/route/apod_detail_page.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+Future<void> _openUrl(BuildContext context, String url) async {
+  final uri = Uri.tryParse(url);
+  if (uri == null) return;
+  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!ok && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('無法開啟連結：$url')),
+    );
+  }
+}
 
 class ChatRoomPage extends StatefulWidget {
   final ChatRoom room;
@@ -126,6 +138,30 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     }
   }
 
+  void _handleBubbleTap(ChatMessage msg) {
+    final apod = msg.apod;
+    if (apod != null) {
+      if (apod.isVideo) {
+        _openUrl(context, apod.url);
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ApodDetailPage(apod: apod),
+          ),
+        );
+      }
+      return;
+    }
+    final wiki = msg.wiki;
+    if (wiki != null) {
+      final url = wiki.url;
+      if (url != null && url.isNotEmpty) {
+        _openUrl(context, url);
+      }
+    }
+  }
+
   Future<void> _addFavorite(ApodData apod) async {
     final already = await FavoritesDB.exists(apod.date);
     if (already) {
@@ -193,15 +229,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                               onLongPress: msg.apod != null
                                   ? () => _addFavorite(msg.apod!)
                                   : null,
-                              onTap: msg.apod != null
-                                  ? () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => ApodDetailPage(
-                                              apod: msg.apod!),
-                                        ),
-                                      )
-                                  : null,
+                              onTap: () => _handleBubbleTap(msg),
                             );
                           },
                         ),
@@ -269,11 +297,25 @@ class _ApodCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (apod.isVideo)
-          Text(
-            '影片：${apod.url}',
-            style: const TextStyle(
-              color: Colors.blue,
-              decoration: TextDecoration.underline,
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                const Icon(Icons.play_circle_fill,
+                    size: 20, color: Colors.redAccent),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '影片：${apod.url}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.blue.shade700,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ],
             ),
           )
         else
@@ -380,12 +422,23 @@ class _WikiCard extends StatelessWidget {
         ],
         if (wiki.url != null && wiki.url!.isNotEmpty) ...[
           const SizedBox(height: 6),
-          Text(
-            wiki.url!,
-            style: TextStyle(
-              color: Colors.blue.shade700,
-              fontSize: 11,
-            ),
+          Row(
+            children: [
+              Icon(Icons.open_in_new, size: 12, color: Colors.blue.shade700),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  wiki.url!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.blue.shade700,
+                    fontSize: 11,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ],
