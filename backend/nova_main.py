@@ -7,9 +7,38 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 from urllib.parse import quote
 import json
+import os
 import re
 import requests
 import nova_init as initParm
+
+# ── Google Font 快取 ──────────────────────────────────────────────────────────
+_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+
+def _fetch_gfont(css_url: str, cache_name: str) -> str | None:
+    """從 Google Fonts 下載 TTF 並快取到 fonts/。回傳本地路徑或 None。"""
+    os.makedirs(_FONT_DIR, exist_ok=True)
+    dest = os.path.join(_FONT_DIR, cache_name)
+    if os.path.exists(dest):
+        return dest
+    try:
+        css = requests.get(
+            css_url,
+            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"},
+            timeout=10,
+        ).text
+        m = re.search(r"src: url\((https://fonts\.gstatic\.com/[^)]+\.ttf)\)", css)
+        if not m:
+            print(f"[font] no TTF found in CSS for {cache_name}")
+            return None
+        ttf_bytes = requests.get(m.group(1), timeout=15).content
+        with open(dest, "wb") as f:
+            f.write(ttf_bytes)
+        print(f"[font] cached {cache_name}")
+        return dest
+    except Exception as e:
+        print(f"[font] download failed ({cache_name}): {e}")
+        return None
 
 
 # 攔截 Groq 對 llama 的 <function=name{json}</function> 壞格式回傳
@@ -250,21 +279,47 @@ def search_wikipedia(query: str) -> dict | None:
 
 # -------- image card --------
 
-_CARD_WIDTH = 1080
-_PADDING = 48
+_CARD_W  = 1080
+_PAD     = 54
+_INFO_H  = 295
+_C_BG    = (5, 5, 5)
+_C_ACCENT = (217, 197, 167)   # warm cream
+_C_FG    = (240, 232, 215)
+_C_MUTED = (138, 130, 118)
+_C_DIM   = (92, 87, 79)
 
 
-def _load_font(size: int):
-    candidates = [
-        "C:/Windows/Fonts/arialbd.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    ]
-    for path in candidates:
+def _card_title_font(size: int):
+    path = _fetch_gfont(
+        "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@1,700",
+        "PlayfairDisplay-BoldItalic.ttf",
+    )
+    if path:
         try:
             return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    for p in [
+        "C:/Windows/Fonts/georgiab.ttf",
+        "C:/Windows/Fonts/timesbd.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+    ]:
+        try:
+            return ImageFont.truetype(p, size)
+        except (OSError, IOError):
+            continue
+    return ImageFont.load_default()
+
+
+def _card_meta_font(size: int):
+    for p in [
+        "C:/Windows/Fonts/cour.ttf",
+        "C:/Windows/Fonts/consola.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ]:
+        try:
+            return ImageFont.truetype(p, size)
         except (OSError, IOError):
             continue
     return ImageFont.load_default()
@@ -287,63 +342,57 @@ def _wrap_text(text: str, font, max_width: int, draw) -> list[str]:
     return lines
 
 
-def compose_card(image_bytes: bytes, title: str, date: str) -> BytesIO:
+def compose_card(image_bytes: bytes, title: str, date: str, copyright_: str = "") -> BytesIO:
+    # ── 縮放圖片至卡片寬度，高度不超過 1440px ──────────────────────────────
     img = Image.open(BytesIO(image_bytes)).convert("RGB")
-    ratio = _CARD_WIDTH / img.width
-    new_h = int(img.height * ratio)
-    img = img.resize((_CARD_WIDTH, new_h), Image.LANCZOS).convert("RGBA")
+    ratio = _CARD_W / img.width
+    new_h = min(int(img.height * ratio), 1440)
+    img = img.resize((_CARD_W, new_h), Image.LANCZOS)
 
-    # 上方深色漸層（讓白字可讀）
-    top_h = 300
-    top_overlay = Image.new("RGBA", (_CARD_WIDTH, top_h), (0, 0, 0, 0))
-    top_draw = ImageDraw.Draw(top_overlay)
-    for y in range(top_h):
-        alpha = int(210 * (1 - y / top_h))
-        top_draw.line([(0, y), (_CARD_WIDTH, y)], fill=(0, 0, 0, alpha))
-    img.paste(top_overlay, (0, 0), top_overlay)
+    # ── 資訊條（純黑底，不覆蓋圖片）─────────────────────────────────────
+    bar = Image.new("RGB", (_CARD_W, _INFO_H), _C_BG)
+    draw = ImageDraw.Draw(bar)
 
-    # 下方薄漸層
-    bottom_h = 90
-    bottom_overlay = Image.new("RGBA", (_CARD_WIDTH, bottom_h), (0, 0, 0, 0))
-    bottom_draw = ImageDraw.Draw(bottom_overlay)
-    for y in range(bottom_h):
-        alpha = int(170 * (y / bottom_h))
-        bottom_draw.line([(0, y), (_CARD_WIDTH, y)], fill=(0, 0, 0, alpha))
-    img.paste(bottom_overlay, (0, img.height - bottom_h), bottom_overlay)
+    # 頂部 accent 線
+    draw.rectangle([(0, 0), (_CARD_W, 3)], fill=_C_ACCENT)
 
-    draw = ImageDraw.Draw(img)
-
-    title_font = _load_font(56)
-    date_font = _load_font(34)
-    attr_font = _load_font(24)
-
-    # 標題（最多 2 行）
-    title_lines = _wrap_text(title, title_font, _CARD_WIDTH - 2 * _PADDING, draw)[:2]
-    y = _PADDING
+    # 標題（Playfair Display Bold Italic，最多 2 行）
+    title_font = _card_title_font(58)
+    title_lines = _wrap_text(title, title_font, _CARD_W - 2 * _PAD, draw)[:2]
+    ty = 26
     for line in title_lines:
-        draw.text((_PADDING, y), line, font=title_font, fill=(255, 255, 255))
-        bbox = draw.textbbox((0, 0), line, font=title_font)
-        y += (bbox[3] - bbox[1]) + 12
+        draw.text((_PAD, ty), line, font=title_font, fill=_C_FG)
+        bb = draw.textbbox((0, 0), line, font=title_font)
+        ty += (bb[3] - bb[1]) + 6
 
     # 日期
-    draw.text((_PADDING, y + 8), date, font=date_font, fill=(220, 220, 220))
+    meta_font = _card_meta_font(26)
+    date_str = date.replace("-", " · ")
+    ty += 12
+    draw.text((_PAD, ty), date_str, font=meta_font, fill=_C_MUTED)
 
-    # 右下角署名
-    attr = "NASA Astronomy Picture of the Day"
-    bbox = draw.textbbox((0, 0), attr, font=attr_font)
-    attr_w = bbox[2] - bbox[0]
+    # 攝影師署名
+    if copyright_:
+        small_font = _card_meta_font(21)
+        cr = copyright_.replace("\n", " ").strip()
+        draw.text((_PAD, ty + 40), f"Photograph  ·  {cr}", font=small_font, fill=_C_DIM)
+
+    # 右下角 NASA 標記
+    attr_font = _card_meta_font(18)
+    attr = "NASA  ASTRONOMY PICTURE OF THE DAY"
+    bb = draw.textbbox((0, 0), attr, font=attr_font)
     draw.text(
-        (_CARD_WIDTH - _PADDING - attr_w, img.height - 55),
-        attr,
-        font=attr_font,
-        fill=(230, 230, 230),
+        (_CARD_W - _PAD - (bb[2] - bb[0]), _INFO_H - 30),
+        attr, font=attr_font, fill=_C_DIM,
     )
 
-    # 扁平化成 RGB 輸出 JPEG
-    flat = Image.new("RGB", img.size, (0, 0, 0))
-    flat.paste(img, (0, 0), img)
+    # ── 合成：圖片在上，資訊條在下 ───────────────────────────────────────
+    canvas = Image.new("RGB", (_CARD_W, new_h + _INFO_H), _C_BG)
+    canvas.paste(img, (0, 0))
+    canvas.paste(bar, (0, new_h))
+
     buf = BytesIO()
-    flat.save(buf, format="JPEG", quality=90)
+    canvas.save(buf, format="JPEG", quality=92)
     buf.seek(0)
     return buf
 
@@ -391,7 +440,12 @@ def apod_card():
         img_url = data.get("hdurl") or data.get("url")
         r = _session.get(img_url, timeout=30)
         r.raise_for_status()
-        buf = compose_card(r.content, data.get("title", ""), data.get("date", ""))
+        buf = compose_card(
+            r.content,
+            data.get("title", ""),
+            data.get("date", ""),
+            copyright_=data.get("copyright", "") or "",
+        )
         return send_file(
             buf,
             mimetype="image/jpeg",
