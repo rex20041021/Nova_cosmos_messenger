@@ -7,8 +7,15 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 from urllib.parse import quote
 import json
+import re
 import requests
 import nova_init as initParm
+
+
+# 攔截 Groq 對 llama 的 <function=name{json}</function> 壞格式回傳
+_FALLBACK_TOOL_RE = re.compile(
+    r"<function=([A-Za-z0-9_]+)(\{.*?\})</function>", re.DOTALL
+)
 
 
 app = Flask(__name__)
@@ -126,7 +133,39 @@ def call_groq(
     if tools:
         payload["tools"] = tools
     r = requests.post(initParm.GROQ_URL, headers=headers, json=payload, timeout=30)
-    r.raise_for_status()
+    if r.status_code == 400:
+        # llama 常吐 <function=name{json}</function> 壞格式，Groq 會回 tool_use_failed
+        try:
+            err = (r.json() or {}).get("error") or {}
+        except ValueError:
+            err = {}
+        if err.get("code") == "tool_use_failed":
+            failed = err.get("failed_generation", "") or ""
+            matches = _FALLBACK_TOOL_RE.findall(failed)
+            if matches:
+                print(f"[groq fallback] recovered {len(matches)} tool_call(s) from failed_generation")
+                tool_calls = [
+                    {
+                        "id": f"fallback_{i}",
+                        "type": "function",
+                        "function": {"name": name, "arguments": args},
+                    }
+                    for i, (name, args) in enumerate(matches)
+                ]
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": tool_calls,
+                            }
+                        }
+                    ]
+                }
+    if r.status_code != 200:
+        print(f"[groq error] status={r.status_code} body={r.text[:1000]}")
+        r.raise_for_status()
     return r.json()
 
 
@@ -456,7 +495,7 @@ def _run_chat_loop(
     return {"text": "（抱歉，剛剛想太久迷路了，再問我一次？）", **extras}
 
 
-# Nova 對話：支援多輪歷史 + APOD tool-calling。Wikipedia tool 之後加入。
+# Nova 對話：支援多輪歷史 + APOD tool-calling and Wikipedia tool-calling。
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json(silent=True) or {}
@@ -473,9 +512,21 @@ def chat():
             tools=[FETCH_APOD_TOOL, SEARCH_WIKIPEDIA_TOOL],
         ))
     except requests.HTTPError as e:
-        return jsonify({"error": f"Groq API error: {e.response.status_code}"}), 502
+        body = ""
+        try:
+            body = e.response.text[:500] if e.response is not None else ""
+        except Exception:
+            pass
+        print(f"[/chat HTTPError] {e} body={body}")
+        return jsonify({"error": f"Groq API error: {e.response.status_code}", "detail": body}), 502
     except requests.RequestException as e:
+        print(f"[/chat RequestException] {e}")
         return jsonify({"error": f"Request failed: {str(e)}"}), 500
+    except Exception as e:
+        import traceback
+        print(f"[/chat Exception] {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
 
 
 # -------- main --------

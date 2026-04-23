@@ -11,7 +11,7 @@ class ChatDB {
   static Future<Database> initDatabase() async {
     _database = await openDatabase(
       join(await getDatabasesPath(), 'chat.db'),
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE $_roomsTable(
@@ -27,6 +27,7 @@ class ChatDB {
             room_id TEXT NOT NULL,
             text TEXT,
             apod_json TEXT,
+            wiki_json TEXT,
             from_user INTEGER NOT NULL,
             created_at INTEGER NOT NULL
           )
@@ -34,6 +35,13 @@ class ChatDB {
         await db.execute(
           'CREATE INDEX idx_messages_room ON $_messagesTable(room_id, created_at)',
         );
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE $_messagesTable ADD COLUMN wiki_json TEXT',
+          );
+        }
       },
     );
     return _database!;

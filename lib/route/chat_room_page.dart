@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nova_cosmos_messenger/models/apod_data.dart';
 import 'package:nova_cosmos_messenger/models/chat_room.dart';
 import 'package:nova_cosmos_messenger/models/chat_message.dart';
+import 'package:nova_cosmos_messenger/models/wiki_info.dart';
 import 'package:nova_cosmos_messenger/services/chat_db.dart';
 import 'package:nova_cosmos_messenger/services/chat_service.dart';
 import 'package:nova_cosmos_messenger/services/favorites_db.dart';
@@ -96,6 +97,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         );
         setState(() => _messages.add(apodMsg));
         await ChatDB.addMessage(apodMsg);
+      }
+      if (reply.wiki != null) {
+        final wikiMsg = ChatMessage(
+          id: _newId(),
+          roomId: widget.room.id,
+          wiki: reply.wiki,
+          fromUser: false,
+          createdAt: now.add(const Duration(milliseconds: 2)),
+        );
+        setState(() => _messages.add(wikiMsg));
+        await ChatDB.addMessage(wikiMsg);
       }
     } catch (e) {
       if (!mounted) return;
@@ -238,7 +250,9 @@ class _MessageBubble extends StatelessWidget {
           decoration: BoxDecoration(color: bg, borderRadius: radius),
           child: message.apod != null
               ? _ApodCard(apod: message.apod!)
-              : Text(message.text ?? ''),
+              : message.wiki != null
+                  ? _WikiCard(wiki: message.wiki!)
+                  : Text(message.text ?? ''),
         ),
       ),
     );
@@ -298,6 +312,82 @@ class _ApodCard extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 13),
         ),
+      ],
+    );
+  }
+}
+
+class _WikiCard extends StatelessWidget {
+  final WikiInfo wiki;
+  const _WikiCard({required this.wiki});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (wiki.thumbnail != null && wiki.thumbnail!.isNotEmpty)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(
+              wiki.thumbnail!,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return const SizedBox(
+                  height: 140,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              },
+              errorBuilder: (context, error, stack) => const SizedBox(
+                height: 100,
+                child: Center(child: Icon(Icons.broken_image, size: 36)),
+              ),
+            ),
+          ),
+        if (wiki.thumbnail != null && wiki.thumbnail!.isNotEmpty)
+          const SizedBox(height: 8),
+        Row(
+          children: [
+            const Icon(Icons.menu_book, size: 16, color: Colors.black54),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                wiki.title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (wiki.description != null && wiki.description!.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            wiki.description!,
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+          ),
+        ],
+        if (wiki.extract != null && wiki.extract!.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            wiki.extract!,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ],
+        if (wiki.url != null && wiki.url!.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            wiki.url!,
+            style: TextStyle(
+              color: Colors.blue.shade700,
+              fontSize: 11,
+            ),
+          ),
+        ],
       ],
     );
   }
