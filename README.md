@@ -4,6 +4,7 @@
 A Flutter chat app where you can talk to **Nova**, an astronomy-focused AI assistant, browse NASA's Astronomy Picture of the Day (APOD), and collect your favourite skies.
 
 DEMO: https://youtu.be/DjMtMbplITE
+
 ---
 
 ## Architecture
