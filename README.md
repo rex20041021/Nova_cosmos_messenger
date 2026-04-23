@@ -60,6 +60,8 @@ DEMO: https://youtu.be/DjMtMbplITE
 
 **Flask** keeps the backend minimal. The only reason a backend exists at all is to proxy API secrets (NASA key, Groq key) away from the client, and to run the server-side card-image composer (Pillow) that cannot run on-device. Everything else stays local.
 
+**NASA APOD API** has a 30 requests/day quota and is occasionally unreliable. Two layers of defence are in place: ① a server-side in-memory cache (`_apod_cache`, keyed by date string) so the same date never hits the API twice; ② `requests.HTTPAdapter` with `Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])` so transient network errors back off and retry automatically instead of surfacing a failure to the user.
+
 **sqflite (SQLite)** provides zero-dependency local persistence. Chat history and favourites survive app restarts without any remote account or network. Schema migrations are handled with `onUpgrade` callbacks — v2 added `wiki_json` via `ALTER TABLE`.
 
 **Groq / llama-3.3-70b-versatile** gives OpenAI-compatible function calling at zero cost during prototyping. Nova runs as a **tool-use agent**: the model decides on its own whether to call `fetch_apod` or `search_wikipedia`, with what arguments, and the backend loop (`_run_chat_loop`) iterates up to 3 rounds so the model can chain tool results into a final answer — the classic ReAct (Reason + Act) pattern.
@@ -93,7 +95,9 @@ All data lives on-device in SQLite — no account required, no network needed fo
 
 Nova is an astronomy-focused AI assistant with **OpenAI-compatible function calling**. Two tools are registered:
 
-- `fetch_apod(date?)` — pulls NASA APOD for any date back to 1995-06-16; results are server-cached to avoid burning the 30 req/day NASA quota.
+- `fetch_apod(date?)` — pulls NASA APOD for any date back to 1995-06-16; results are server-cached to avoid burning the 30 req/day quota. Accepted date formats:
+  - Explicit: `2004-10-21`, `2004/10/21`
+  - Natural language (resolved by the model): "今天的 APOD", "昨天", "兩天前", "give me the picture from October 10, 2000"
 - `search_wikipedia(query)` — searches English Wikipedia and returns a structured summary; the system prompt instructs the model to translate Chinese terms to English before querying (e.g. 蟹狀星雲 → Crab Nebula).
 
 **Multi-turn history** — the full room message history is sent on every `/chat` request, giving the model conversation memory within a session.
